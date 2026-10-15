@@ -1,0 +1,9 @@
+{
+  "SUCCESS": "نجاح",
+  "UNAUTHORIZED": "دخول غير مصرح",
+  "FORBIDDEN": "ممنوع الوصول",
+  "NOT_FOUND": "المورد غير موجود",
+  "SIGN_IN_SUCCESS": "تم تسجيل الدخول بنجاح",
+  "SIGN_OUT_SUCCESS": "تم تسجيل الخروج بنجاح",
+  "PAYMENT_SUCCESS": "تم تحصيل الدفعة بنجاح"
+}

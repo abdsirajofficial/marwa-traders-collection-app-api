@@ -1,0 +1,9 @@
+{
+  "SUCCESS": "Success",
+  "UNAUTHORIZED": "Unauthorized access",
+  "FORBIDDEN": "Forbidden access",
+  "NOT_FOUND": "Resource not found",
+  "SIGN_IN_SUCCESS": "Employee signed in successfully",
+  "SIGN_OUT_SUCCESS": "Employee signed out successfully",
+  "PAYMENT_SUCCESS": "Payment collected successfully"
+}
