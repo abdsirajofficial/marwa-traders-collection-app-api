@@ -86,6 +86,14 @@ export const buildOwnerDailyReportMessage = ({
       .join('\n\n');
   }
 
+  // Calculate settlement status
+  const settledCollections = collections.filter((c) => c.settled);
+  const settledAmount = settledCollections.reduce((sum, c) => sum + (c.amount || 0), 0);
+  const unsettledAmount = Math.max(0, totalCashCollected - settledAmount);
+  const settlementStatus = unsettledAmount > 0
+    ? `PENDING (Unsettled Cash: ₹${formatCurrency(unsettledAmount)})`
+    : `SETTLED`;
+
   return (
     `MARWA TRADERS — DAILY COLLECTION REPORT\n\n` +
     `Employee: ${employeeName}\n` +
@@ -95,10 +103,11 @@ export const buildOwnerDailyReportMessage = ({
     `Sign Out: ${signOutTimeStr}\n` +
     `Sign Out Location: ${signOutLocStr}\n\n` +
     `Total Transactions: ${totalTransactions}\n` +
-    `Total Cash Collected: ₹${formatCurrency(totalCashCollected)}\n\n` +
+    `Total Cash Collected: ₹${formatCurrency(totalCashCollected)}\n` +
+    `Settlement Status: ${settlementStatus}\n\n` +
     `Collection Details:\n\n` +
     `${collectionDetailsText}\n\n` +
-    `Expected Cash: ₹${formatCurrency(expectedCash)}\n\n` +
+    `Expected Cash for Handover: ₹${formatCurrency(expectedCash)}\n\n` +
     `Employee signed out successfully.`
   );
 };

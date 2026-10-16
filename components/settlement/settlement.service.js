@@ -40,7 +40,7 @@ export const createSettlement = async ({
   settledBy,
   ipAddress = null,
 }) => {
-  if (settledBy._id.toString() === employeeId.toString()) {
+  if (settledBy._id.toString() === employeeId.toString() && settledBy.role !== ROLES.OWNER) {
     throw new ApiError(403, 'Cash collectors cannot settle their own cash collections');
   }
 
@@ -247,13 +247,15 @@ export const reviewPaymentCorrection = async ({ correctionId, status, reviewNote
     // 4. If requestedAmount > 0, generate new corrected payment
     let newPayment = null;
     if (correction.requestedAmount > 0) {
+      const originalCollector = await User.findById(payment.collectedBy);
+      const collectorForReplacement = originalCollector || reviewer;
       const { createPayment } = await import('../payment/payment.service.js');
       const result = await createPayment({
         customerId: payment.customerId.toString(),
         amount: correction.requestedAmount,
         paymentMode: 'CASH',
         location: payment.location,
-        collector: reviewer,
+        collector: collectorForReplacement,
         notes: `Corrected replacement for #${payment.receiptNumber}`,
       });
       newPayment = result.payment;

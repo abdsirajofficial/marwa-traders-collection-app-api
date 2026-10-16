@@ -14,6 +14,7 @@ import * as paymentService from '../components/payment/payment.service.js';
 import * as settlementService from '../components/settlement/settlement.service.js';
 import * as attendanceService from '../components/employee-attendance/employee-attendance.service.js';
 import * as userService from '../components/user/user.service.js';
+import * as authService from '../components/auth/auth.service.js';
 import { generateAuthToken } from '../common/service/token.service.js';
 
 const TEST_DB_URI = 'mongodb://localhost:27017/marwa_traders_test';
@@ -616,6 +617,67 @@ describe('Marwa Traders - Prompt 2 Architecture & Core Business Logic Tests', ()
         staffUser
       )
     ).rejects.toThrow(/You do not have permission to create users/);
+  });
+
+  // Prompt 2 Test 17: Mobile App Login & Cash Collection strictly restricted to Owner and Cash Collector
+  it('Test 17 — Only Owner and Cash Collector can login to mobile and collect cash; Admin and Staff are rejected', async () => {
+    // 1. Mobile login check
+    // Owner can login on mobile
+    const ownerLogin = await authService.loginWithCode('1001', '127.0.0.1', 'mobile');
+    expect(ownerLogin.user.role).toBe('OWNER');
+
+    // Cash Collector can login on mobile
+    const collectorLogin = await authService.loginWithCode('4001', '127.0.0.1', 'mobile');
+    expect(collectorLogin.user.role).toBe('CASH_COLLECTOR');
+
+    // Admin CANNOT login on mobile (throws 403)
+    await expect(
+      authService.loginWithCode('2001', '127.0.0.1', 'mobile')
+    ).rejects.toThrow(/Only Owner and Cash Collectors are authorized to login to the mobile collection app/);
+
+    // Staff CANNOT login on mobile (throws 403)
+    await expect(
+      authService.loginWithCode('3001', '127.0.0.1', 'mobile')
+    ).rejects.toThrow(/Only Owner and Cash Collectors are authorized to login to the mobile collection app/);
+
+    // 2. Collection check
+    const customer = await customerService.createCustomer(
+      {
+        shopName: 'Test Role Shop',
+        ownerName: 'Test Owner',
+        mobile: '9845199999',
+        address: 'Salem City',
+        openingBalance: 15000,
+      },
+      adminUser
+    );
+
+    // Admin CANNOT collect money from shop (throws 403)
+    await expect(
+      paymentService.createPayment({
+        customerId: customer._id.toString(),
+        amount: 2000,
+        collector: adminUser,
+      })
+    ).rejects.toThrow(/Only the Owner and Cash Collectors are authorized to collect money from shops/);
+
+    // Staff CANNOT collect money from shop (throws 403)
+    await expect(
+      paymentService.createPayment({
+        customerId: customer._id.toString(),
+        amount: 2000,
+        collector: staffUser,
+      })
+    ).rejects.toThrow(/Only the Owner and Cash Collectors are authorized to collect money from shops/);
+
+    // Owner CAN collect money from shop
+    const ownerPaymentResult = await paymentService.createPayment({
+      customerId: customer._id.toString(),
+      amount: 3000,
+      collector: ownerUser,
+    });
+    expect(ownerPaymentResult.payment.amount).toBe(3000);
+    expect(ownerPaymentResult.payment.status).toBe('COMPLETED');
   });
 });
 

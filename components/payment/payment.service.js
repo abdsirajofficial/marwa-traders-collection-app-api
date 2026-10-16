@@ -23,26 +23,33 @@ export const createPayment = async ({
   collector,
   ipAddress = null,
 }) => {
+  // Only OWNER and CASH_COLLECTOR are authorized to collect money from shops
+  if (collector.role !== ROLES.OWNER && collector.role !== ROLES.CASH_COLLECTOR) {
+    throw new ApiError(
+      403,
+      'Unauthorized: Only the Owner and Cash Collectors are authorized to collect money from shops.'
+    );
+  }
+
   const numAmount = Number(amount);
   if (isNaN(numAmount) || numAmount <= 0) {
     throw new ApiError(400, 'Payment amount must be a positive number');
   }
 
-  // 1. Enforce ACTIVE Work Session for Cash Collectors (Part 13 & 35)
+  // 1. Enforce / Link ACTIVE Work Session for Cash Collector (and Owner if active)
   let activeWorkSessionId = null;
-  if (collector.role === ROLES.CASH_COLLECTOR) {
-    const activeSession = await EmployeeAttendance.findOne({
-      employeeId: collector._id,
-      status: ATTENDANCE_STATUS.ACTIVE,
-    });
+  const activeSession = await EmployeeAttendance.findOne({
+    employeeId: collector._id,
+    status: ATTENDANCE_STATUS.ACTIVE,
+  });
 
-    if (!activeSession) {
-      throw new ApiError(
-        403,
-        'Employee must be signed in with an active work session before collecting payments. Please click SIGN IN.'
-      );
-    }
+  if (activeSession) {
     activeWorkSessionId = activeSession.workSessionId;
+  } else if (collector.role === ROLES.CASH_COLLECTOR) {
+    throw new ApiError(
+      403,
+      'Employee must be signed in with an active work session before collecting payments. Please click SIGN IN.'
+    );
   }
 
   // 2. Idempotency Check

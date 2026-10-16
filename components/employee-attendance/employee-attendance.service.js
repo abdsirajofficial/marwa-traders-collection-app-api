@@ -5,7 +5,7 @@ import { ApiError } from '../../common/utils/api-error.util.js';
 import { logAuditEvent } from '../audit-log/audit-log.service.js';
 import { NotificationService } from '../../common/service/notification.service.js';
 import { generateWorkSessionId, getTodayDateString } from './employee-attendance.helper.js';
-import { ATTENDANCE_STATUS, AUDIT_ACTIONS } from '../../common/utils/constants.js';
+import { ROLES, ATTENDANCE_STATUS, AUDIT_ACTIONS } from '../../common/utils/constants.js';
 
 /**
  * Section 7 & 28: Employee Sign-In Service
@@ -15,6 +15,14 @@ export const signIn = async (employeeId, location = {}, ipAddress = null) => {
   const employee = await User.findById(employeeId);
   if (!employee || !employee.isActive) {
     throw new ApiError(404, 'Employee not found or inactive');
+  }
+
+  // Only Owner and Cash Collectors can initiate collection work sessions
+  if (employee.role !== ROLES.OWNER && employee.role !== ROLES.CASH_COLLECTOR) {
+    throw new ApiError(
+      403,
+      'Unauthorized: Only Owner and Cash Collectors can initiate collection work sessions.'
+    );
   }
 
   // Check if an ACTIVE work session already exists for this employee

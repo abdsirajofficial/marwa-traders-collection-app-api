@@ -2,9 +2,9 @@ import { User } from '../user/user.model.js';
 import { generateAuthToken } from '../../common/service/token.service.js';
 import { ApiError } from '../../common/utils/api-error.util.js';
 import { logAuditEvent } from '../audit-log/audit-log.service.js';
-import { AUDIT_ACTIONS } from '../../common/utils/constants.js';
+import { ROLES, AUDIT_ACTIONS } from '../../common/utils/constants.js';
 
-export const loginWithCode = async (code, ipAddress = null) => {
+export const loginWithCode = async (code, ipAddress = null, client = null) => {
   const trimmedCode = code.trim();
   const user = await User.findOne({ code: trimmedCode });
 
@@ -14,6 +14,14 @@ export const loginWithCode = async (code, ipAddress = null) => {
 
   if (!user.isActive) {
     throw new ApiError(403, 'User account is inactive. Please contact administrator.');
+  }
+
+  // Mobile App restriction: Only OWNER and CASH_COLLECTOR are authorized
+  if (client === 'mobile' && user.role !== ROLES.OWNER && user.role !== ROLES.CASH_COLLECTOR) {
+    throw new ApiError(
+      403,
+      'Access denied: Only Owner and Cash Collectors are authorized to login to the mobile collection app.'
+    );
   }
 
   const token = generateAuthToken(user);

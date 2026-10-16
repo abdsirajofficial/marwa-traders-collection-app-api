@@ -59,29 +59,38 @@ export const requireActiveWorkSession = async (req, res, next) => {
       return next(new ApiError(401, 'Authentication required.'));
     }
 
-    // Owner and Admin can collect without employee daily attendance restriction if needed
-    if (req.user.role === ROLES.OWNER || req.user.role === ROLES.ADMIN) {
-      return next();
+    // Only OWNER and CASH_COLLECTOR are authorized to collect money from shops
+    if (req.user.role !== ROLES.OWNER && req.user.role !== ROLES.CASH_COLLECTOR) {
+      return next(
+        new ApiError(
+          403,
+          'Unauthorized: Only Owner and Cash Collectors are authorized to collect money from shops.'
+        )
+      );
     }
 
-    // For CASH_COLLECTOR (and STAFF if collecting), an ACTIVE session is strictly required
+    // Check if user has an active work session (e.g. signed in on mobile)
     const activeSession = await EmployeeAttendance.findOne({
       employeeId: req.user._id,
       status: ATTENDANCE_STATUS.ACTIVE,
     });
 
-    if (!activeSession) {
-      return next(
-        new ApiError(
-          403,
-          'You are not signed in. An active daily work session is required before collecting payments. Please click SIGN IN.'
-        )
-      );
+    if (activeSession) {
+      req.activeWorkSession = activeSession;
+      return next();
     }
 
-    // Attach active workSession to request
-    req.activeWorkSession = activeSession;
-    next();
+    // Owner can collect directly without mandatory daily attendance restriction if needed
+    if (req.user.role === ROLES.OWNER) {
+      return next();
+    }
+
+    return next(
+      new ApiError(
+        403,
+        'You are not signed in. An active daily work session is required before collecting payments. Please click SIGN IN.'
+      )
+    );
   } catch (err) {
     next(err);
   }
