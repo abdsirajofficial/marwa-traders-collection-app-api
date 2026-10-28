@@ -22,3 +22,8 @@ export const createInvoice = catchAsync(async (req, res) => {
   const invoice = await invoiceService.createInvoice(req.body, req.user, req.ip);
   return sendResponse(res, 'Invoice created successfully', { invoice }, 201);
 });
+
+export const updateInvoice = catchAsync(async (req, res) => {
+  const invoice = await invoiceService.updateInvoice(req.params.id, req.body, req.user, req.ip);
+  return sendResponse(res, 'Invoice updated successfully', { invoice });
+});

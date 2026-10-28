@@ -12,7 +12,7 @@ router.post('/', authorize(ROLES.OWNER, ROLES.ADMIN, ROLES.STAFF), customerContr
 router.get('/:id', customerController.getCustomerById);
 router.get('/:id/ledger', customerController.getCustomerById);
 router.get('/:id/invoices', customerController.getCustomerById);
-router.put('/:id', authorize(ROLES.OWNER, ROLES.ADMIN, ROLES.STAFF), customerController.updateCustomer);
-router.patch('/:id', authorize(ROLES.OWNER, ROLES.ADMIN, ROLES.STAFF), customerController.updateCustomer);
+router.put('/:id', authorize(ROLES.OWNER), customerController.updateCustomer);
+router.patch('/:id', authorize(ROLES.OWNER), customerController.updateCustomer);
 
 export default router;

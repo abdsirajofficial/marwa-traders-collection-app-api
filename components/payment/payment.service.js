@@ -6,6 +6,7 @@ import { ApiError } from '../../common/utils/api-error.util.js';
 import { logAuditEvent } from '../audit-log/audit-log.service.js';
 import { NotificationService } from '../../common/service/notification.service.js';
 import { generateReceiptNumber } from './payment.helper.js';
+import { applyInvoiceStatus } from '../invoice/invoice.helper.js';
 import { computeCustomerOutstanding } from '../customer/customer.service.js';
 import { ROLES, ATTENDANCE_STATUS, AUDIT_ACTIONS } from '../../common/utils/constants.js';
 
@@ -175,6 +176,117 @@ export const createPayment = async ({
     .populate('collectedBy', 'name code');
 
   return { payment: populated, isDuplicate: false };
+};
+
+const releasePaymentAllocations = async (payment) => {
+  for (const allocation of payment.allocations || []) {
+    const invoice = await Invoice.findById(allocation.invoiceId);
+    if (!invoice) continue;
+    const net = Math.max(0, Number(invoice.invoiceAmount || 0) - Number(invoice.initialPayment || 0));
+    invoice.outstandingAmount = Math.min(net, Number(invoice.outstandingAmount || 0) + allocation.amountAllocated);
+    applyInvoiceStatus(invoice);
+    await invoice.save();
+  }
+};
+
+const allocatePaymentAmount = async (customerId, amount) => {
+  const unpaidInvoices = await Invoice.find({
+    customerId,
+    outstandingAmount: { $gt: 0 },
+  }).sort({ invoiceDate: 1, createdAt: 1 });
+
+  let unallocated = amount;
+  const allocations = [];
+
+  for (const invoice of unpaidInvoices) {
+    if (unallocated <= 0) break;
+    const amountForThis = Math.min(invoice.outstandingAmount, unallocated);
+    invoice.outstandingAmount -= amountForThis;
+    unallocated -= amountForThis;
+    applyInvoiceStatus(invoice);
+    await invoice.save();
+    allocations.push({
+      invoiceId: invoice._id,
+      amountAllocated: amountForThis,
+    });
+  }
+
+  return allocations;
+};
+
+export const updatePayment = async (id, data, user, ipAddress = null) => {
+  if (user?.role !== ROLES.OWNER) {
+    throw new ApiError(403, 'Only the Owner can edit payments');
+  }
+
+  const payment = await Payment.findById(id);
+  if (!payment) throw new ApiError(404, 'Payment not found');
+  if (payment.status === 'REVERSED') {
+    throw new ApiError(400, 'A reversed payment cannot be edited');
+  }
+
+  const newAmount = Number(data.amount);
+  if (Number.isNaN(newAmount) || newAmount <= 0) {
+    throw new ApiError(400, 'Payment amount must be a positive number');
+  }
+
+  const newMode = data.paymentMode || payment.paymentMode || 'CASH';
+  if (!['CASH', 'GPAY'].includes(newMode)) {
+    throw new ApiError(400, 'Payment mode must be CASH or GPAY');
+  }
+
+  const oldAmount = payment.amount;
+  const oldMode = payment.paymentMode;
+  const amountChanged = newAmount !== oldAmount;
+
+  if (amountChanged) {
+    const liveOutstanding = await computeCustomerOutstanding(payment.customerId);
+    const available = liveOutstanding + oldAmount;
+    if (newAmount > available) {
+      throw new ApiError(
+        400,
+        `Payment amount (₹${newAmount.toLocaleString('en-IN')}) exceeds the available balance of ₹${available.toLocaleString('en-IN')}`
+      );
+    }
+
+    await releasePaymentAllocations(payment);
+    payment.allocations = await allocatePaymentAmount(payment.customerId, newAmount);
+    payment.amount = newAmount;
+    payment.remainingOutstanding = Math.max(0, Number(payment.previousOutstanding || 0) - newAmount);
+
+    if (payment.workSessionId) {
+      await EmployeeAttendance.findOneAndUpdate(
+        { workSessionId: payment.workSessionId },
+        { $inc: { totalCollected: newAmount - oldAmount } }
+      ).catch((err) => console.warn('Failed to update session total after payment edit:', err.message));
+    }
+  }
+
+  payment.paymentMode = newMode;
+  await payment.save();
+  await computeCustomerOutstanding(payment.customerId);
+
+  await logAuditEvent({
+    userId: user._id,
+    userCode: user.code,
+    role: user.role,
+    action: AUDIT_ACTIONS.UPDATE_PAYMENT,
+    entity: 'PAYMENT',
+    entityId: payment._id.toString(),
+    description: `Updated receipt #${payment.receiptNumber}. Amount ₹${oldAmount} → ₹${payment.amount}, Mode ${oldMode} → ${payment.paymentMode}`,
+    ipAddress,
+    metadata: {
+      receiptNumber: payment.receiptNumber,
+      oldAmount,
+      amount: payment.amount,
+      oldMode,
+      paymentMode: payment.paymentMode,
+    },
+  });
+
+  return Payment.findById(payment._id)
+    .populate('customerId', 'shopName ownerName customerCode mobile address')
+    .populate('collectedBy', 'name code');
 };
 
 export const getPayments = async ({

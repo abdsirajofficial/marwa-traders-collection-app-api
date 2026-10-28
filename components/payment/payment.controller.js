@@ -53,6 +53,11 @@ export const getPaymentById = catchAsync(async (req, res) => {
   return sendResponse(res, 'Payment details retrieved', { payment });
 });
 
+export const updatePayment = catchAsync(async (req, res) => {
+  const payment = await paymentService.updatePayment(req.params.id, req.body, req.user, req.ip);
+  return sendResponse(res, 'Payment updated successfully', { payment });
+});
+
 export const getCollectorToday = catchAsync(async (req, res) => {
   const summary = await paymentService.getCollectorTodaySummary(req.user._id);
   return sendResponse(res, 'Today collection summary', summary);

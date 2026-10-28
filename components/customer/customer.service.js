@@ -60,6 +60,10 @@ export const createCustomer = async (data, user, ipAddress = null) => {
 };
 
 export const updateCustomer = async (id, data, user, ipAddress = null) => {
+  if (user?.role !== ROLES.OWNER) {
+    throw new ApiError(403, 'Only the Owner can edit customers');
+  }
+
   const customer = await Customer.findById(id);
   if (!customer) throw new ApiError(404, 'Customer not found');
 
@@ -76,11 +80,12 @@ export const updateCustomer = async (id, data, user, ipAddress = null) => {
   if (data.mobile) customer.mobile = data.mobile;
   if (data.address) customer.address = data.address;
 
-  if (data.openingBalance !== undefined && data.openingBalance !== customer.openingBalance) {
-    if (![ROLES.OWNER, ROLES.ADMIN].includes(user.role)) {
-      throw new ApiError(403, 'Only Owner or Admin can modify customer opening balance');
+  if (data.openingBalance !== undefined && Number(data.openingBalance) !== customer.openingBalance) {
+    const openingBalance = Number(data.openingBalance);
+    if (Number.isNaN(openingBalance) || openingBalance < 0) {
+      throw new ApiError(400, 'Opening balance must be a non-negative number');
     }
-    customer.openingBalance = Number(data.openingBalance);
+    customer.openingBalance = openingBalance;
   }
 
   await customer.save();
