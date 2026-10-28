@@ -10,7 +10,13 @@ export const getUsers = async (role = null) => {
 };
 
 export const getCollectors = async () => {
-  return User.find({ role: ROLES.CASH_COLLECTOR, isActive: true, isRemoved: { $ne: true } })
+  // Owners collect cash on the mobile app the same way cash collectors do.
+  // Both must appear on the desktop cash settlement page.
+  return User.find({
+    role: { $in: [ROLES.OWNER, ROLES.CASH_COLLECTOR] },
+    isActive: true,
+    isRemoved: { $ne: true },
+  })
     .select('name code phone role')
     .sort({ code: 1 });
 };
