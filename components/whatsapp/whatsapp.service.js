@@ -4,6 +4,8 @@ import { NotificationLog } from './whatsapp.model.js';
 import {
   buildCustomerPaymentReceiptMessage,
   buildOwnerDailyReportMessage,
+  formatCurrency,
+  formatDateTime,
 } from './whatsapp.helper.js';
 import { logAuditEvent } from '../audit-log/audit-log.service.js';
 import { addJob } from '../../common/service/queue.service.js';
@@ -27,28 +29,43 @@ export function formatWhatsAppNumber(recipientNumber) {
 /**
  * Low-level HTTP dispatch to WhatsApp Cloud API / provider
  */
-async function sendWhatsAppHttp(recipientNumber, messageBody) {
+async function sendWhatsAppHttp(recipientNumber, messageBody, templateName = null, templateParams = null) {
   const formattedNumber = formatWhatsAppNumber(recipientNumber);
 
   if (config.whatsapp.accessToken && config.whatsapp.phoneNumberId) {
     const url = `${config.whatsapp.apiUrl}/${config.whatsapp.phoneNumberId}/messages`;
     console.log(`[WhatsAppService] Dispatching WhatsApp message to ${formattedNumber} (${url})...`);
-    return axios.post(
-      url,
-      {
-        messaging_product: 'whatsapp',
-        to: formattedNumber,
-        type: 'text',
-        text: { body: messageBody },
+
+    const payload = (templateName && Array.isArray(templateParams) && templateParams.length > 0)
+      ? {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: templateName,
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'body',
+                parameters: templateParams.map((p) => ({ type: 'text', text: String(p) })),
+              },
+            ],
+          },
+        }
+      : {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'text',
+          text: { body: messageBody },
+        };
+
+    return axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${config.whatsapp.accessToken}`,
+        'Content-Type': 'application/json',
       },
-      {
-        headers: {
-          Authorization: `Bearer ${config.whatsapp.accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000,
-      }
-    );
+      timeout: 10000,
+    });
   }
 
   // Simulated provider mode (Dev/Test)
@@ -57,9 +74,9 @@ async function sendWhatsAppHttp(recipientNumber, messageBody) {
 }
 
 async function processDirectDispatch(jobData) {
-  const { logId, recipientNumber, messageBody, referenceId, recipientType } = jobData;
+  const { logId, recipientNumber, messageBody, referenceId, recipientType, templateName, templateParams } = jobData;
   try {
-    const res = await sendWhatsAppHttp(recipientNumber, messageBody);
+    const res = await sendWhatsAppHttp(recipientNumber, messageBody, templateName, templateParams);
     await NotificationLog.findByIdAndUpdate(logId, { status: NOTIFICATION_STATUS.SENT });
     console.log(`[WhatsAppService] Delivery SUCCESSFUL to ${recipientNumber} for ref: ${referenceId}`);
     await logAuditEvent({
@@ -90,7 +107,7 @@ async function processDirectDispatch(jobData) {
   }
 }
 
-async function queueOrDispatchNotification({ recipientType, recipientNumber, referenceId, templateName, messageBody }) {
+async function queueOrDispatchNotification({ recipientType, recipientNumber, referenceId, templateName, templateParams = null, messageBody }) {
   try {
     const log = await NotificationLog.create({
       recipientType,
@@ -107,6 +124,7 @@ async function queueOrDispatchNotification({ recipientType, recipientNumber, ref
       recipientNumber,
       referenceId,
       templateName,
+      templateParams,
       messageBody,
     };
 
@@ -123,6 +141,8 @@ async function queueOrDispatchNotification({ recipientType, recipientNumber, ref
 export async function sendCustomerPaymentReceipt({ customer, payment, collector }) {
   if (!customer?.mobile) return;
 
+  const { dateStr, timeStr } = formatDateTime(payment.createdAt);
+
   const messageBody = buildCustomerPaymentReceiptMessage({
     customerName: customer.shopName,
     receiptNumber: payment.receiptNumber,
@@ -133,11 +153,23 @@ export async function sendCustomerPaymentReceipt({ customer, payment, collector 
     createdAt: payment.createdAt,
   });
 
+  const templateParams = [
+    customer.shopName || 'Customer',
+    payment.receiptNumber || 'N/A',
+    formatCurrency(payment.previousOutstanding),
+    formatCurrency(payment.amount),
+    formatCurrency(payment.remainingOutstanding),
+    collector?.name || 'Collector',
+    dateStr,
+    timeStr,
+  ];
+
   return queueOrDispatchNotification({
     recipientType: 'CUSTOMER',
     recipientNumber: customer.mobile,
     referenceId: payment.receiptNumber,
     templateName: WHATSAPP_TEMPLATES.PAYMENT_RECEIPT,
+    templateParams,
     messageBody,
   });
 }
@@ -148,11 +180,24 @@ export async function sendCustomerPaymentReceipt({ customer, payment, collector 
 export async function sendEmployeeDailyReport({
   session,
   employee,
-  collections,
-  totalTransactions,
-  totalCollected,
+  collections = [],
+  totalTransactions = 0,
+  totalCollected = 0,
 }) {
   if (!config.whatsapp.ownerNumber) return;
+
+  const signInTimeStr = formatDateTime(session.signInTime).timeStr;
+  const signOutTimeStr = formatDateTime(session.signOutTime).timeStr;
+  const signInLocStr = session.signInLocation?.address || (session.signInLocation?.latitude ? `${session.signInLocation.latitude}, ${session.signInLocation.longitude}` : 'Salem');
+  const signOutLocStr = session.signOutLocation?.address || (session.signOutLocation?.latitude ? `${session.signOutLocation.latitude}, ${session.signOutLocation.longitude}` : 'Salem');
+
+  // Calculate settlement status
+  const settledCollections = (collections || []).filter((c) => c.settled);
+  const settledAmount = settledCollections.reduce((sum, c) => sum + (c.amount || 0), 0);
+  const unsettledAmount = Math.max(0, (totalCollected || 0) - settledAmount);
+  const settlementStatus = unsettledAmount > 0
+    ? `PENDING (₹${formatCurrency(unsettledAmount)})`
+    : `SETTLED`;
 
   const messageBody = buildOwnerDailyReportMessage({
     employeeName: employee.name,
@@ -167,11 +212,25 @@ export async function sendEmployeeDailyReport({
     expectedCash: totalCollected,
   });
 
+  const templateParams = [
+    employee.name || 'Employee',
+    session.date || formatDateTime().dateStr,
+    signInTimeStr,
+    signInLocStr,
+    signOutTimeStr,
+    signOutLocStr,
+    String(totalTransactions),
+    formatCurrency(totalCollected),
+    settlementStatus,
+    formatCurrency(totalCollected),
+  ];
+
   return queueOrDispatchNotification({
     recipientType: 'OWNER',
     recipientNumber: config.whatsapp.ownerNumber,
     referenceId: session.workSessionId,
     templateName: WHATSAPP_TEMPLATES.EMPLOYEE_DAILY_REPORT,
+    templateParams,
     messageBody,
   });
 }
