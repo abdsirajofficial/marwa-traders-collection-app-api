@@ -10,16 +10,34 @@ import { addJob } from '../../common/service/queue.service.js';
 import { NOTIFICATION_STATUS, WHATSAPP_TEMPLATES, AUDIT_ACTIONS } from '../../common/utils/constants.js';
 
 /**
+ * Format recipient number with country code (defaults to 91 for India if 10 digits)
+ */
+export function formatWhatsAppNumber(recipientNumber) {
+  if (!recipientNumber) return '';
+  let cleaned = String(recipientNumber).replace(/\D/g, '');
+  if (cleaned.length === 10) {
+    return `91${cleaned}`;
+  }
+  if (cleaned.length === 11 && cleaned.startsWith('0')) {
+    return `91${cleaned.substring(1)}`;
+  }
+  return cleaned;
+}
+
+/**
  * Low-level HTTP dispatch to WhatsApp Cloud API / provider
  */
 async function sendWhatsAppHttp(recipientNumber, messageBody) {
+  const formattedNumber = formatWhatsAppNumber(recipientNumber);
+
   if (config.whatsapp.accessToken && config.whatsapp.phoneNumberId) {
     const url = `${config.whatsapp.apiUrl}/${config.whatsapp.phoneNumberId}/messages`;
+    console.log(`[WhatsAppService] Dispatching WhatsApp message to ${formattedNumber} (${url})...`);
     return axios.post(
       url,
       {
         messaging_product: 'whatsapp',
-        to: recipientNumber.replace(/\D/g, ''),
+        to: formattedNumber,
         type: 'text',
         text: { body: messageBody },
       },
@@ -34,15 +52,16 @@ async function sendWhatsAppHttp(recipientNumber, messageBody) {
   }
 
   // Simulated provider mode (Dev/Test)
-  console.log(`[WhatsApp Provider] Sending to ${recipientNumber}:\n${messageBody}\n----------------------------------`);
+  console.log(`[WhatsApp Provider] Sending to ${formattedNumber}:\n${messageBody}\n----------------------------------`);
   return { status: 200, data: { messages: [{ id: `wamid.mock.${Date.now()}` }] } };
 }
 
 async function processDirectDispatch(jobData) {
   const { logId, recipientNumber, messageBody, referenceId, recipientType } = jobData;
   try {
-    await sendWhatsAppHttp(recipientNumber, messageBody);
+    const res = await sendWhatsAppHttp(recipientNumber, messageBody);
     await NotificationLog.findByIdAndUpdate(logId, { status: NOTIFICATION_STATUS.SENT });
+    console.log(`[WhatsAppService] Delivery SUCCESSFUL to ${recipientNumber} for ref: ${referenceId}`);
     await logAuditEvent({
       role: 'SYSTEM',
       action: AUDIT_ACTIONS.NOTIFICATION_SENT,
@@ -51,10 +70,14 @@ async function processDirectDispatch(jobData) {
       description: `WhatsApp ${recipientType} notification sent for ref: ${referenceId}`,
     });
   } catch (error) {
-    console.error(`[WhatsAppService] Delivery failed to ${recipientNumber}:`, error.message);
+    const errorDetails = error.response?.data
+      ? JSON.stringify(error.response.data)
+      : error.message;
+
+    console.error(`[WhatsAppService] Delivery failed to ${recipientNumber}:`, errorDetails);
     await NotificationLog.findByIdAndUpdate(logId, {
       status: NOTIFICATION_STATUS.FAILED,
-      errorMessage: error.message,
+      errorMessage: errorDetails,
       $inc: { retryCount: 1 },
     });
     await logAuditEvent({
@@ -62,7 +85,7 @@ async function processDirectDispatch(jobData) {
       action: AUDIT_ACTIONS.NOTIFICATION_FAILED,
       entity: 'NOTIFICATION',
       entityId: logId,
-      description: `WhatsApp notification failed for ref ${referenceId}: ${error.message}`,
+      description: `WhatsApp notification failed for ref ${referenceId}: ${errorDetails}`,
     });
   }
 }
