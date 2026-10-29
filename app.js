@@ -33,6 +33,23 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Privacy Policy Endpoint for Meta Compliance
+app.get('/privacy', (req, res) => {
+  res.status(200).send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="UTF-8"><title>Marwa Traders Privacy Policy</title></head>
+    <body style="font-family:sans-serif;max-width:800px;margin:40px auto;line-height:1.6;padding:0 20px;">
+      <h1>Privacy Policy — Marwa Traders</h1>
+      <p>Last updated: October 2026</p>
+      <p>Marwa Traders uses the WhatsApp Business API solely to deliver transaction receipts and collection updates to registered customers and business owners.</p>
+      <p>We do not sell, rent, or share customer contact information or transaction data with third parties.</p>
+      <p>For questions or support, contact Marwa Traders management.</p>
+    </body>
+    </html>
+  `);
+});
+
 // Mount Routes under /api
 app.use('/api', routes);
 
